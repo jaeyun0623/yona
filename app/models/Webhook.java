@@ -47,6 +47,10 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 
+import java.net.URI;
+import java.net.URISyntaxException;
+
+
 /**
  * A webhook to be sent by events in project
  */
@@ -181,13 +185,19 @@ public class Webhook extends Model implements ResourceConvertible {
 
     private String buildRequestMessage(String url, String message) {
         StringBuilder requestMessage = new StringBuilder();
-        requestMessage.append(String.format(" <%s%s|", getBaseUrl(), url));
-        if (this.webhookType == WebhookType.DETAIL_SLACK) {
-            requestMessage.append(message.replace(">", "&gt;"));
-        } else {
-            requestMessage.append(message);
+        if(this.webhookType == WebhookType.KAKAOWORK){
+            requestMessage.append(String.format("\n%s",message));
+            requestMessage.append(String.format("\n%s%s", getBaseUrl(), url));
+        }else{
+            requestMessage.append(String.format(" <%s%s|", getBaseUrl(), url));
+            if (this.webhookType == WebhookType.DETAIL_SLACK) {
+                requestMessage.append(message.replace(">", "&gt;"));
+            } else {
+                requestMessage.append(message);
+            }
+            requestMessage.append(">");
         }
-        requestMessage.append(">");
+
         return requestMessage.toString();
     }
 
@@ -195,6 +205,8 @@ public class Webhook extends Model implements ResourceConvertible {
     public void sendRequestToPayloadUrl(EventType eventType, User sender, Issue eventIssue) {
         String requestBodyString = "";
         String requestMessage = buildRequestBody(eventType, sender, eventIssue);
+
+        play.Logger.warn(String.format("[TEST] sendRequestToPayloadUrl: %s", eventType));
 
         if (this.webhookType == WebhookType.DETAIL_SLACK) {
             ArrayNode attachments = buildIssueDetails(eventIssue, eventType);
@@ -517,6 +529,20 @@ public class Webhook extends Model implements ResourceConvertible {
     private String buildTextPropertyOnlyJSON(String requestMessage) {
         ObjectNode requestBody = Json.newObject();
         requestBody.put("text", requestMessage);
+        if(this.webhookType == WebhookType.KAKAOWORK){
+            try {
+                URI uri = new URI(payloadUrl);
+                if(StringUtils.isNotBlank(uri.getQuery())){
+                    for (String param : uri.getQuery().split("&")) {
+                        String[] keyValue = param.split("=");
+                        requestBody.put(keyValue[0], keyValue[1]);
+                        play.Logger.debug("[Query Params To Request Body] "+keyValue[0] + ": "+keyValue[1]);
+                    }
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
         return Json.stringify(requestBody);
     }
 
@@ -591,69 +617,86 @@ public class Webhook extends Model implements ResourceConvertible {
     private void sendRequest(String payload) {
         play.Logger.info(payload);
         try {
-            WSRequestHolder requestHolder = WS.url(this.payloadUrl);
+            String tempUrl=this.payloadUrl;
+            if(tempUrl.indexOf("?")>=0)tempUrl=tempUrl.split("\\?")[0];
+            WSRequestHolder requestHolder = WS.url(tempUrl);
             if (StringUtils.isNotBlank(this.secret)) {
-                requestHolder.setHeader("Authorization", String.format("token %s ", this.secret));
-            }
+                if(this.webhookType == WebhookType.KAKAOWORK){
+                    requestHolder.setHeader("Authorization", String.format("Bearer %s", this.secret));
+                } else {
+                    requestHolder.setHeader("Authorization", String.format("token %s ", this.secret));
+                }
+            } 
             requestHolder
-                    .setHeader("Content-Type", "application/json")
-                    .setHeader("User-Agent", "Yobi-Hookshot")
-                    .post(payload)
-                    .map(
-                            new Function<WSResponse, Integer>() {
-                                public Integer apply(WSResponse response) {
-                                    int statusCode = response.getStatus();
-                                    String statusText = response.getStatusText();
-                                    if (statusCode < 200 || statusCode >= 300) {
-                                        // Unsuccessful status code - log some information in server.
-                                        Logger.info(String.format("[Webhook] Request responded code  %d: %s", statusCode, statusText));
-                                        Logger.info(String.format("[Webhook] Request payload: %s", payload));
-                                    }
-                                    return 0;
+                .setHeader("Content-Type", "application/json")
+                .setHeader("User-Agent", "Yona-Hookshot")
+                .post(payload)
+                .map(
+                        new Function<WSResponse, Integer>() {
+                            public Integer apply(WSResponse response) {
+                                int statusCode = response.getStatus();
+                                String statusText = response.getStatusText();
+                                String responseBody = response.getBody();
+                                if (statusCode < 200 || statusCode >= 300) {
+                                    // Unsuccessful status code - log some information in server.
+                                    Logger.info(String.format("[Webhook1] Request responded code  %d: %s", statusCode, statusText));
+                                    Logger.info(String.format("[Webhook1] Request statusText: %s", statusText));
+                                    Logger.info(String.format("[Webhook1] Request responseBody: %s", responseBody));
                                 }
+                                return 0;
                             }
-                    );
+                        }
+                );
         } catch (Exception e) {
             // Request failed (Dead end point or invalid payload URL) - log some information in server.
-            Logger.info("[Webhook] Request failed at given payload URL: " + this.payloadUrl);
+            Logger.info("[Webhook1] Request failed at given payload URL: " + this.payloadUrl);
+            e.printStackTrace();
         }
     }
 
     private void sendRequest(String payload, Long webhookId, Resource resource) {
         play.Logger.info(payload);
         try {
-            WSRequestHolder requestHolder = WS.url(this.payloadUrl);
+            String tempUrl=this.payloadUrl;
+            if(tempUrl.indexOf("?")>=0)tempUrl=tempUrl.split("\\?")[0];
+            WSRequestHolder requestHolder = WS.url(tempUrl);
             if (StringUtils.isNotBlank(this.secret)) {
-                requestHolder.setHeader("Authorization", String.format("token %s ", this.secret));
-            }
-
+                if(this.webhookType == WebhookType.KAKAOWORK){
+                    requestHolder.setHeader("Authorization", String.format("Bearer %s", this.secret));
+                } else {
+                    requestHolder.setHeader("Authorization", String.format("token %s ", this.secret));
+                }
+            } 
             requestHolder
-                    .setHeader("Content-Type", "application/json")
-                    .setHeader("User-Agent", "Yobi-Hookshot")
-                    .post(payload)
-                    .map(
-                            new Function<WSResponse, Integer>() {
-                                public Integer apply(WSResponse response) {
-                                    int statusCode = response.getStatus();
-                                    String statusText = response.getStatusText();
-                                    if (statusCode < 200 || statusCode >= 300) {
-                                        // Unsuccessful status code - log some information in server.
-                                        Logger.info(String.format("[Webhook] Request responded code  %d: %s", statusCode, statusText));
-                                        Logger.info(String.format("[Webhook] Request payload: %s", payload));
-                                    } else {
-                                        WebhookThread webhookthread = WebhookThread.getWebhookThread(webhookId, resource);
-                                        if (webhookthread == null) {
-                                            String threadId = response.asJson().findPath("thread").findPath("name").asText();
-                                            webhookthread = WebhookThread.create(webhookId, resource, threadId);
-                                        }
+                .setHeader("Content-Type", "application/json")
+                .setHeader("User-Agent", "Yona-Hookshot")
+                .post(payload)
+                .map(
+                        new Function<WSResponse, Integer>() {
+                            public Integer apply(WSResponse response) {
+                                int statusCode = response.getStatus();
+                                String statusText = response.getStatusText();
+                                String responseBody = response.getBody();
+                                if (statusCode < 200 || statusCode >= 300) {
+                                    // Unsuccessful status code - log some information in server.
+                                    Logger.info(String.format("[Webhook2] Request responded code  %d: %s", statusCode, statusText));
+                                    Logger.info(String.format("[Webhook2] Request statusText: %s", statusText));
+                                    Logger.info(String.format("[Webhook2] Request responseBody: %s", responseBody));
+                                } else {
+                                    WebhookThread webhookthread = WebhookThread.getWebhookThread(webhookId, resource);
+                                    if (webhookthread == null) {
+                                        String threadId = response.asJson().findPath("thread").findPath("name").asText();
+                                        webhookthread = WebhookThread.create(webhookId, resource, threadId);
                                     }
-                                    return 0;
                                 }
+                                return 0;
                             }
-                    );
+                        }
+                );
         } catch (Exception e) {
             // Request failed (Dead end point or invalid payload URL) - log some information in server.
-            Logger.info("[Webhook] Request failed at given payload URL: " + this.payloadUrl);
+            Logger.info("[Webhook2] Request failed at given payload URL: " + this.payloadUrl);
+            e.printStackTrace();
         }
     }
 

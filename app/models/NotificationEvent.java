@@ -628,6 +628,38 @@ public class NotificationEvent extends Model implements INotificationEvent {
         }
     }
 
+    private static void webhookRequest(EventType eventTypes, Issue issue, Set<User> receivers) {
+        List<Webhook> webhookList = Webhook.findByProject(issue.project.id);
+        for (Webhook webhook : webhookList) {
+            if (webhook.webhookType != WebhookType.JSON) {
+                // Send push event via webhook payload URLs.
+                if(receiverCheck(webhook, receivers))
+                webhook.sendRequestToPayloadUrl(eventTypes, UserApp.currentUser(), issue);
+            }
+        } 
+    }
+
+    private static Boolean receiverCheck(Webhook webhook, Set<User> receivers) {
+        if(webhook.webhookType != WebhookType.KAKAOWORK) return true;
+        if(!StringUtils.contains(webhook.payloadUrl, "send_by_email")) return true;
+
+        receivers.remove(User.anonymous);
+        if(receivers.isEmpty()) return false;
+
+        play.Logger.warn("[NotificationEvent] receiverCheck : receivers="+receivers.toString());
+        Boolean checkResult = false;
+        Iterator<User> iterator = receivers.iterator();
+        while (iterator.hasNext()) {
+            User user = iterator.next();
+            play.Logger.warn("[NotificationEvent] receiverCheck : user.email="+user.email);
+            if (user.state == UserState.ACTIVE && StringUtils.contains(webhook.payloadUrl, user.email)) {
+                checkResult = true;
+                break;
+            }
+        }
+        return checkResult;
+    }
+
     private static void webhookRequest(EventType eventTypes, Issue issue, Project previous) {
         List<Webhook> webhookList = Webhook.findByProject(issue.project.id);
         for (Webhook webhook : webhookList) {
@@ -903,19 +935,20 @@ public class NotificationEvent extends Model implements INotificationEvent {
     }
 
     public static NotificationEvent afterNewIssue(Issue issue) {
-        NotificationEvent notiEvent = forNewIssue(issue, UserApp.currentUser());
-        NotificationEvent.add(notiEvent);
-        webhookRequest(NEW_ISSUE, issue);
-        return notiEvent;
+        return forNewIssue(issue, UserApp.currentUser());
     }
 
     public static NotificationEvent forNewIssue(Issue issue, User author) {
+
         NotificationEvent notiEvent = createFrom(author, issue);
         notiEvent.title = formatNewTitle(issue);
         notiEvent.receivers = getReceivers(issue, author);
         notiEvent.eventType = NEW_ISSUE;
         notiEvent.oldValue = null;
         notiEvent.newValue = issue.body;
+        NotificationEvent.add(notiEvent);
+
+        webhookRequest(NEW_ISSUE, issue, notiEvent.receivers);
         return notiEvent;
     }
 

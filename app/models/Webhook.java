@@ -51,6 +51,10 @@ import java.net.URI;
 import java.net.URISyntaxException;
 
 
+import java.net.URI;
+import java.net.URISyntaxException;
+
+
 /**
  * A webhook to be sent by events in project
  */
@@ -198,6 +202,19 @@ public class Webhook extends Model implements ResourceConvertible {
             requestMessage.append(">");
         }
 
+        if(this.webhookType == WebhookType.KAKAOWORK){
+            requestMessage.append(String.format("\n%s",message));
+            requestMessage.append(String.format("\n%s%s", getBaseUrl(), url));
+        }else{
+            requestMessage.append(String.format(" <%s%s|", getBaseUrl(), url));
+            if (this.webhookType == WebhookType.DETAIL_SLACK) {
+                requestMessage.append(message.replace(">", "&gt;"));
+            } else {
+                requestMessage.append(message);
+            }
+            requestMessage.append(">");
+        }
+
         return requestMessage.toString();
     }
 
@@ -205,6 +222,8 @@ public class Webhook extends Model implements ResourceConvertible {
     public void sendRequestToPayloadUrl(EventType eventType, User sender, Issue eventIssue) {
         String requestBodyString = "";
         String requestMessage = buildRequestBody(eventType, sender, eventIssue);
+
+        play.Logger.warn(String.format("[TEST] sendRequestToPayloadUrl: %s", eventType));
 
         play.Logger.warn(String.format("[TEST] sendRequestToPayloadUrl: %s", eventType));
 
@@ -529,19 +548,17 @@ public class Webhook extends Model implements ResourceConvertible {
     private String buildTextPropertyOnlyJSON(String requestMessage) {
         ObjectNode requestBody = Json.newObject();
         requestBody.put("text", requestMessage);
-        if(this.webhookType == WebhookType.KAKAOWORK){
-            try {
-                URI uri = new URI(payloadUrl);
-                if(StringUtils.isNotBlank(uri.getQuery())){
-                    for (String param : uri.getQuery().split("&")) {
-                        String[] keyValue = param.split("=");
-                        requestBody.put(keyValue[0], keyValue[1]);
-                        play.Logger.debug("[Query Params To Request Body] "+keyValue[0] + ": "+keyValue[1]);
-                    }
+        try {
+            URI uri = new URI(payloadUrl);
+            if(StringUtils.isNotBlank(uri.getQuery())){
+                for (String param : uri.getQuery().split("&")) {
+                    String[] keyValue = param.split("=");
+                    requestBody.put(keyValue[0], keyValue[1]);
+                    play.Logger.debug("[Query Params To Request Body] "+keyValue[0] + ": "+keyValue[1]);
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
             }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
         return Json.stringify(requestBody);
     }
@@ -617,19 +634,7 @@ public class Webhook extends Model implements ResourceConvertible {
     private void sendRequest(String payload) {
         play.Logger.info(payload);
         try {
-            String tempUrl=this.payloadUrl;
-            if(tempUrl.indexOf("?")>=0)tempUrl=tempUrl.split("\\?")[0];
-            WSRequestHolder requestHolder = WS.url(tempUrl);
-            if (StringUtils.isNotBlank(this.secret)) {
-                if(this.webhookType == WebhookType.KAKAOWORK){
-                    requestHolder.setHeader("Authorization", String.format("Bearer %s", this.secret));
-                } else {
-                    requestHolder.setHeader("Authorization", String.format("token %s ", this.secret));
-                }
-            } 
-            requestHolder
-                .setHeader("Content-Type", "application/json")
-                .setHeader("User-Agent", "Yona-Hookshot")
+            getRequestHolderForSendRequest()
                 .post(payload)
                 .map(
                         new Function<WSResponse, Integer>() {
@@ -651,25 +656,15 @@ public class Webhook extends Model implements ResourceConvertible {
             // Request failed (Dead end point or invalid payload URL) - log some information in server.
             Logger.info("[Webhook1] Request failed at given payload URL: " + this.payloadUrl);
             e.printStackTrace();
+            Logger.info("[Webhook1] Request failed at given payload URL: " + this.payloadUrl);
+            e.printStackTrace();
         }
     }
 
     private void sendRequest(String payload, Long webhookId, Resource resource) {
         play.Logger.info(payload);
         try {
-            String tempUrl=this.payloadUrl;
-            if(tempUrl.indexOf("?")>=0)tempUrl=tempUrl.split("\\?")[0];
-            WSRequestHolder requestHolder = WS.url(tempUrl);
-            if (StringUtils.isNotBlank(this.secret)) {
-                if(this.webhookType == WebhookType.KAKAOWORK){
-                    requestHolder.setHeader("Authorization", String.format("Bearer %s", this.secret));
-                } else {
-                    requestHolder.setHeader("Authorization", String.format("token %s ", this.secret));
-                }
-            } 
-            requestHolder
-                .setHeader("Content-Type", "application/json")
-                .setHeader("User-Agent", "Yona-Hookshot")
+            getRequestHolderForSendRequest()
                 .post(payload)
                 .map(
                         new Function<WSResponse, Integer>() {
@@ -697,7 +692,25 @@ public class Webhook extends Model implements ResourceConvertible {
             // Request failed (Dead end point or invalid payload URL) - log some information in server.
             Logger.info("[Webhook2] Request failed at given payload URL: " + this.payloadUrl);
             e.printStackTrace();
+            Logger.info("[Webhook2] Request failed at given payload URL: " + this.payloadUrl);
+            e.printStackTrace();
         }
+    }
+
+    private WSRequestHolder getRequestHolderForSendRequest() {
+        String tempUrl=this.payloadUrl;
+        if(tempUrl.indexOf("?")>=0)tempUrl=tempUrl.split("\\?")[0];
+        WSRequestHolder requestHolder = WS.url(tempUrl);
+        if (StringUtils.isNotBlank(this.secret)) {
+            if(this.webhookType == WebhookType.KAKAOWORK){
+                requestHolder.setHeader("Authorization", String.format("Bearer %s", this.secret));
+            } else {
+                requestHolder.setHeader("Authorization", String.format("token %s ", this.secret));
+            }
+        } 
+        return requestHolder
+            .setHeader("Content-Type", "application/json")
+            .setHeader("User-Agent", "Yona-Hookshot");
     }
 
     // Commit (message)
